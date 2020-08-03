@@ -14,6 +14,9 @@ Parameters:
     Type: String
   CfLogsDatabase:
     Type: String
+  AthenaWorkGroupName:
+    Type: String
+    Default: primary
   ResourcePrefix: 
     Type: String
     Default: 'myapp'
@@ -87,6 +90,7 @@ Resources:
                     TARGET_TABLE: !Ref PartitionedParquetTable
                     DATABASE: !Ref CfLogsDatabase
                     ATHENA_QUERY_RESULTS_LOCATION: !Sub "s3://${CloudFrontAccessLogsBucket}/athena-query-results"
+                    ATHENA_WORK_GROUP_NAME: !Ref AthenaWorkGroupName
             Events:
               HourlyEvt:
                 Type: Schedule
@@ -128,6 +132,7 @@ Resources:
                     TABLE: !Ref PartitionedGzTable
                     DATABASE: !Ref CfLogsDatabase
                     ATHENA_QUERY_RESULTS_LOCATION: !Sub "s3://${CloudFrontAccessLogsBucket}/athena-query-results"
+                    ATHENA_WORK_GROUP_NAME: !Ref AthenaWorkGroupName
             Events:
               HourlyEvt:
                 Type: Schedule
@@ -164,6 +169,22 @@ Resources:
             Principal: s3.amazonaws.com
             SourceAccount: !Ref AWS::AccountId
             SourceArn: !Sub "arn:${AWS::Partition}:s3:::${CloudFrontAccessLogsBucket}"
+
+    AthenaWorkGroup:
+      Type: AWS::Athena::WorkGroup
+      Properties:
+        Name: !Ref AthenaWorkGroupName
+        Description: Cloudfront Log
+        State: ENABLED
+        Tags:
+          - Key: "Cost"
+            Value: "infra"
+          - Key: "Name"
+            Value: !Ref AthenaWorkGroupName
+        WorkGroupConfiguration:
+          EnforceWorkGroupConfiguration: true
+          PublishCloudWatchMetricsEnabled: true
+          RequesterPaysEnabled: true
 
 
 # Glue Resources

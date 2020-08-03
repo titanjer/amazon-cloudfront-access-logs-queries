@@ -5,6 +5,7 @@ const athena = new aws.Athena({ apiVersion: '2017-05-181' });
 
 // s3 URL of the query results (without trailing slash)
 const athenaQueryResultsLocation = process.env.ATHENA_QUERY_RESULTS_LOCATION;
+const athenaWorkGroupName = process.env.ATHENA_WORK_GROUP_NAME;
 
 async function waitForQueryExecution(queryExecutionId) {
     while (true) {
@@ -26,7 +27,8 @@ exports.runQuery = async (query) => {
         QueryString: query,
         ResultConfiguration: {
             OutputLocation: athenaQueryResultsLocation
-        }
+        },
+        WorkGroup: athenaWorkGroupName
     };
     return athena.startQueryExecution(params).promise()
         .then(data => waitForQueryExecution(data.QueryExecutionId));
