@@ -11,11 +11,11 @@ const targetKeyPrefix = process.env.TARGET_KEY_PREFIX;
 // - 2.	month
 // - 3.	day 
 // - 4.	hour
-const datePattern = '[^\\d](\\d{4})-(\\d{2})-(\\d{2})-(\\d{2})[^\\d]';
+const datePattern = '[^\\d](\\d{4})-(\\d{2})-(\\d{2})-(\\d{2}).*\.gz';
 const filenamePattern = '[^/]+$';
 
 exports.handler = async (event, context, callback) => {
-  const moves = event.Records.map(record => {
+  const moves = event.Records.map(async record => {
     const bucket = record.s3.bucket.name;
     const sourceKey = record.s3.object.key;
 
@@ -24,10 +24,17 @@ exports.handler = async (event, context, callback) => {
     if (match == null) {
       console.log(`Object key ${sourceKey} does not look like an access log file, so it will not be moved.`);
     } else {
+      const headParams = {
+        Bucket: bucket,
+        Key: sourceKey
+      };
+      let data = await s3.headObject(headParams).promise();
+      const lastModified = (data.LastModified.getTime() / 1000);
+
       const [, year, month, day, hour] = match;
 
       const filenameRegex = new RegExp(filenamePattern, 'g');
-      const filename = filenameRegex.exec(sourceKey)[0];
+      const filename = filenameRegex.exec(sourceKey)[0].slice(0, -2) + lastModified + '.gz';
 
       const targetKey = `${targetKeyPrefix}year=${year}/month=${month}/day=${day}/hour=${hour}/${filename}`;
       console.log(`Copying ${sourceKey} to ${targetKey}.`);
