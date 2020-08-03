@@ -10,6 +10,10 @@ Description: >
     Athena and AWS Glue).
 
 Parameters:
+  CloudFrontAccessLogsBucket:
+    Type: String
+  CfLogsDatabase:
+    Type: String
   ResourcePrefix: 
     Type: String
     Default: 'myapp'
@@ -59,12 +63,12 @@ Resources:
                   Action:
                     - s3:ListBucket
                     - s3:GetBucketLocation
-                  Resource: !Sub "arn:${AWS::Partition}:s3:::${ResourcePrefix}-${AWS::AccountId}-cf-access-logs"
+                  Resource: !Sub "arn:${AWS::Partition}:s3:::${CloudFrontAccessLogsBucket}"
                 - Effect: Allow
                   Action:
                     - s3:PutObject
                     - s3:GetObject
-                  Resource: !Sub "arn:${AWS::Partition}:s3:::${ResourcePrefix}-${AWS::AccountId}-cf-access-logs/*"
+                  Resource: !Sub "arn:${AWS::Partition}:s3:::${CloudFrontAccessLogsBucket}/*"
                 - Effect: Allow
                   Action:
                     - glue:CreatePartition
@@ -82,7 +86,7 @@ Resources:
                     SOURCE_TABLE: !Ref PartitionedGzTable
                     TARGET_TABLE: !Ref PartitionedParquetTable
                     DATABASE: !Ref CfLogsDatabase
-                    ATHENA_QUERY_RESULTS_LOCATION: !Sub "s3://${ResourcePrefix}-${AWS::AccountId}-cf-access-logs/athena-query-results"
+                    ATHENA_QUERY_RESULTS_LOCATION: !Sub "s3://${CloudFrontAccessLogsBucket}/athena-query-results"
             Events:
               HourlyEvt:
                 Type: Schedule
@@ -107,11 +111,11 @@ Resources:
                   Action:
                     - s3:ListBucket
                     - s3:GetBucketLocation
-                  Resource: !Sub "arn:${AWS::Partition}:s3:::${ResourcePrefix}-${AWS::AccountId}-cf-access-logs"
+                  Resource: !Sub "arn:${AWS::Partition}:s3:::${CloudFrontAccessLogsBucket}"
                 - Effect: Allow
                   Action:
                     - s3:PutObject
-                  Resource: !Sub "arn:${AWS::Partition}:s3:::${ResourcePrefix}-${AWS::AccountId}-cf-access-logs/*"
+                  Resource: !Sub "arn:${AWS::Partition}:s3:::${CloudFrontAccessLogsBucket}/*"
                 - Effect: Allow
                   Action:
                     - glue:CreatePartition
@@ -123,7 +127,7 @@ Resources:
                 Variables:
                     TABLE: !Ref PartitionedGzTable
                     DATABASE: !Ref CfLogsDatabase
-                    ATHENA_QUERY_RESULTS_LOCATION: !Sub "s3://${ResourcePrefix}-${AWS::AccountId}-cf-access-logs/athena-query-results"
+                    ATHENA_QUERY_RESULTS_LOCATION: !Sub "s3://${CloudFrontAccessLogsBucket}/athena-query-results"
             Events:
               HourlyEvt:
                 Type: Schedule
@@ -143,30 +147,24 @@ Resources:
                   Action:
                     - s3:GetObject
                     - s3:DeleteObject
-                  Resource: !Sub "arn:${AWS::Partition}:s3:::${ResourcePrefix}-${AWS::AccountId}-cf-access-logs/${NewKeyPrefix}*"
+                  Resource: !Sub "arn:${AWS::Partition}:s3:::${CloudFrontAccessLogsBucket}/${NewKeyPrefix}*"
                 - Effect: Allow
                   Action:
                     - s3:PutObject
-                  Resource: !Sub "arn:${AWS::Partition}:s3:::${ResourcePrefix}-${AWS::AccountId}-cf-access-logs/${GzKeyPrefix}*"
+                  Resource: !Sub "arn:${AWS::Partition}:s3:::${CloudFrontAccessLogsBucket}/${GzKeyPrefix}*"
             Environment:
                 Variables:
                     TARGET_KEY_PREFIX: !Ref GzKeyPrefix
-            Events:
-                AccessLogsUploadedEvent:
-                    Type: S3
-                    Properties:
-                        Bucket: !Ref CloudFrontAccessLogsBucket 
-                        Events: s3:ObjectCreated:*
-                        Filter:
-                            S3Key:
-                                Rules:
-                                - Name: prefix
-                                  Value: !Ref NewKeyPrefix
-    CloudFrontAccessLogsBucket :
-        Type: "AWS::S3::Bucket"
-        Description: "Bucket for Amazon CloudFront access logs"
+
+    MoveNewAccessLogsFnPermission:
+        Type: AWS::Lambda::Permission
         Properties:
-            BucketName: !Sub "${ResourcePrefix}-${AWS::AccountId}-cf-access-logs"
+            Action: 'lambda:InvokeFunction'
+            FunctionName: !Ref MoveNewAccessLogsFn
+            Principal: s3.amazonaws.com
+            SourceAccount: !Ref AWS::AccountId
+            SourceArn: !Sub "arn:${AWS::Partition}:s3:::${CloudFrontAccessLogsBucket}"
+
 
 # Glue Resources
 # - Database
@@ -174,19 +172,13 @@ Resources:
 # - Partitioned Parquet Table
 # - Combined view of both tables
 
-    CfLogsDatabase:
-        Type: AWS::Glue::Database
-        Properties:
-          CatalogId: !Ref AWS::AccountId
-          DatabaseInput:
-            Name: !Sub "${ResourcePrefix}_cf_access_logs_db"
     PartitionedGzTable:
       Type: AWS::Glue::Table
       Properties:
         CatalogId: !Ref AWS::AccountId
         DatabaseName: !Ref CfLogsDatabase
         TableInput:
-          Name: 'partitioned_gz'
+          Name: !Sub "${ResourcePrefix}_gz"
           Description: 'Gzip logs delivered by Amazon CloudFront partitioned'
           TableType: EXTERNAL_TABLE
           Parameters: { "skip.header.line.count": "2" }
@@ -269,7 +261,7 @@ Resources:
             - Name: sc_range_end
               Type: bigint
             InputFormat: org.apache.hadoop.mapred.TextInputFormat
-            Location: !Sub "s3://${ResourcePrefix}-${AWS::AccountId}-cf-access-logs/${GzKeyPrefix}"
+            Location: !Sub "s3://${CloudFrontAccessLogsBucket}/${GzKeyPrefix}"
             SerdeInfo:
               Parameters:
                 field.delim": "\t"
@@ -281,7 +273,7 @@ Resources:
         CatalogId: !Ref AWS::AccountId
         DatabaseName: !Ref CfLogsDatabase
         TableInput:
-          Name: 'partitioned_parquet'
+          Name: !Sub "${ResourcePrefix}_parquet"
           Description: 'Parquet format access logs as transformed from gzip version'
           TableType: EXTERNAL_TABLE
           Parameters: { 'has_encrypted_data': 'false', 'parquet.compression': 'SNAPPY' }
@@ -364,7 +356,7 @@ Resources:
             - Name: sc_range_end
               Type: bigint
             InputFormat: org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat
-            Location: !Sub "s3://${ResourcePrefix}-${AWS::AccountId}-cf-access-logs/${ParquetKeyPrefix}"
+            Location: !Sub "s3://${CloudFrontAccessLogsBucket}/${ParquetKeyPrefix}"
             SerdeInfo:
               SerializationLibrary: org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe
     CombinedView:
@@ -373,7 +365,7 @@ Resources:
         CatalogId: !Ref AWS::AccountId
         DatabaseName: !Ref CfLogsDatabase
         TableInput:
-          Name: 'combined'
+          Name: !Ref ResourcePrefix
           Description: 'combined view over gzip and parquet tables'
           TableType: VIRTUAL_VIEW
           Parameters: { 'presto_view': 'true' }
@@ -513,3 +505,7 @@ Resources:
                     partitioned_gz_table: !Ref PartitionedGzTable,
                     partitioned_parquet_table: !Ref PartitionedParquetTable }
               - ' */'
+
+Outputs:
+  MoveNewAccessLogsFnName:
+    Value: !Ref MoveNewAccessLogsFn
