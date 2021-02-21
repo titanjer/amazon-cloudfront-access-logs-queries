@@ -95,7 +95,58 @@ Resources:
               HourlyEvt:
                 Type: Schedule
                 Properties:
-                  Schedule: cron(10 4 * * ? *)
+                  Schedule: cron(10 6 * * ? *)
+
+    CleanInsertedGzFilesDailyFn:
+        Type: AWS::Serverless::Function
+        Properties:
+            CodeUri: functions/
+            Handler: cleanInsertedGzFilesDaily.handler
+            Runtime: nodejs12.x
+            Timeout: 900
+            Policies:
+            - Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - athena:StartQueryExecution
+                    - athena:GetQueryExecution
+                  Resource: '*'
+                - Effect: Allow
+                  Action:
+                    - s3:ListBucket
+                    - s3:GetBucketLocation
+                  Resource: !Sub "arn:${AWS::Partition}:s3:::${CloudFrontAccessLogsBucket}"
+                - Effect: Allow
+                  Action:
+                    - s3:PutObject
+                    - s3:GetObject
+                    - s3:DeleteObject
+                  Resource: !Sub "arn:${AWS::Partition}:s3:::${CloudFrontAccessLogsBucket}/*"
+                - Effect: Allow
+                  Action:
+                    - glue:CreatePartition
+                    - glue:GetDatabase
+                    - glue:GetTable
+                    - glue:BatchCreatePartition
+                    - glue:GetPartition
+                    - glue:GetPartitions
+                    - glue:CreateTable
+                    - glue:DeleteTable
+                    - glue:DeletePartition
+                  Resource: '*'
+            Environment:
+                Variables:
+                    SOURCE_TABLE: !Ref PartitionedGzTable
+                    TARGET_TABLE: !Ref PartitionedParquetTable
+                    DATABASE: !Ref CfLogsDatabase
+                    ATHENA_QUERY_RESULTS_LOCATION: !Sub "s3://${CloudFrontAccessLogsBucket}/athena-query-results"
+                    ATHENA_WORK_GROUP_NAME: !Ref AthenaWorkGroupName
+            Events:
+              HourlyEvt:
+                Type: Schedule
+                Properties:
+                  Schedule: cron(20 6 * * ? *)
 
     TransformPartFn:
         Type: AWS::Serverless::Function
